@@ -193,7 +193,7 @@ add_filter( 'trp_skip_gettext_processing', 'trp_dk_pdf_strip_gettext_from_pdf' )
 
 function trp_dk_pdf_strip_gettext_from_pdf( $bool ){
 
-    if ( isset( $_GET['pdf'] ) && class_exists( 'DKPDF' ) ){
+    if ( isset( $_GET['pdf'] ) && ( class_exists( 'DKPDF' ) || defined( 'DKPDF_VERSION' ) ) ){
         return true;
     }
 
@@ -204,7 +204,7 @@ function trp_dk_pdf_strip_gettext_from_pdf( $bool ){
 add_filter('trp_stop_translating_page', 'trp_do_not_translate_dk_pdf', 10, 2);
 function trp_do_not_translate_dk_pdf($translate, $output){
 
-    if ( isset( $_GET['pdf'] ) && class_exists( 'DKPDF' ) ){
+    if ( isset( $_GET['pdf'] ) && ( class_exists( 'DKPDF' ) || defined( 'DKPDF_VERSION' ) ) ){
         return true;
     }
 
@@ -2677,3 +2677,82 @@ function trp_breakdance_compat__remove_filter() {
         remove_filter( 'template_include', 'Breakdance\\ActionsFilters\\template_include', 1000000 );
 }
 add_action( 'plugins_loaded', 'trp_breakdance_compat__remove_filter', 20 );
+
+/*
+ * Add support for Simple Download Manager on certain hosts (not replicated locally)
+ * Having TP installed will brake archives, an extra line gets added to the archive processing due to output buffer.
+ * Do not translate url's like this as it brakes them because they are archives's: https://translatepress.ddev.site/ro/?sdm_process_download=1&download_id=95
+ */
+add_action( 'trp_before_running_hooks', 'trp_sdm_compat_remove_hooks_that_start_object_buffer', 10, 1);
+function trp_sdm_compat_remove_hooks_that_start_object_buffer( $trp_loader ) {
+    if ( isset( $_GET['sdm_process_download'] ) && isset( $_GET['download_id'] ) ) {
+        add_filter( 'trp_skip_gettext_processing', '__return_true' );
+        $trp                = TRP_Translate_Press::get_trp_instance();
+        $translation_render = $trp->get_component( 'translation_render' );
+        $trp_loader->remove_hook( 'init', 'start_output_buffer', $translation_render );
+    }
+}
+
+/*
+ * Disable gettext translation of the job manager slugs as they conflict with TranslatePress.
+ */
+add_filter( 'gettext_with_context', 'trp_ignore_wp_job_manager_slugs', 99, 4 );
+function trp_ignore_wp_job_manager_slugs( $translation, $text, $context = null, $domain = null ) {
+    static $targets = [ 'job', 'job-category', 'job-type', 'job-listings' ];
+
+    if ( $domain == 'wp-job-manager' && in_array( $text, $targets, true ) ) {
+        return $text; // Always return the original untranslated string
+    }
+
+    return $translation;
+}
+
+/**
+ * Add trp-post-container wrapper to Divi module outputs
+ * TP is not adding any trp-post-container except here.
+ *
+ * @param string $output The module HTML output
+ * @param string $render_slug The module slug (e.g., 'et_pb_text', 'et_pb_post_title')
+ * @param object $module The module object
+ * @return string Modified output with trp-post-container wrapper
+ */
+add_filter('et_module_shortcode_output', 'trp_divi_wrap_module_with_post_id', 10, 3);
+
+function trp_divi_wrap_module_with_post_id($output, $render_slug, $module) {
+    global $post, $TRP_LANGUAGE;
+
+    // Check if we have a valid post ID
+    if (empty($post->ID)) {
+        return $output;
+    }
+
+    // Get TranslatePress settings
+    $trp = TRP_Translate_Press::get_trp_instance();
+    $trp_settings = $trp->get_component('settings');
+    $settings = $trp_settings->get_settings();
+
+    // Only wrap on non-default language
+    if ($TRP_LANGUAGE !== $settings['default-language']) {
+        // Only wrap modules that typically contain translatable text content
+        $modules_to_wrap = apply_filters('trp_divi_modules_to_wrap', array(
+            'et_pb_text',
+            'et_pb_post_title',
+            'et_pb_post_content',
+            'et_pb_blurb',
+            'et_pb_cta',
+            'et_pb_accordion',
+            'et_pb_toggle',
+            'et_pb_tabs',
+            'et_pb_testimonial',
+            'et_pb_pricing_tables',
+            'et_pb_number_counter',
+            'et_pb_countdown_timer'
+        ));
+
+        if (in_array($render_slug, $modules_to_wrap)) {
+            $output = "<trp-post-container data-trp-post-id='" . $post->ID . "'>" . $output . "</trp-post-container>";
+        }
+    }
+
+    return $output;
+}

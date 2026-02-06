@@ -58,7 +58,14 @@ class TRP_Language_Switcher_V2 {
         $this->trp      = $trp;
         $this->viewport = wp_is_mobile() ? 'mobile' : 'desktop';
 
-        $this->config = $this->language_switcher_tab->get_initial_config(); // In case it's not yet initialized, we initialize it here
+        // In case it's not yet initialized, we initialize it here
+        $this->config = $this->language_switcher_tab->get_initial_config();
+
+        /**
+         * Add the shortcode here instead of init, so we can run the render_shortcode function on pages excluded from translation
+         * Needed because otherwise the shortcode wouldn't be processed at all and [language-switcher] text would appear on excluded pages
+         */
+        add_shortcode( 'language-switcher', [ $this, 'render_shortcode' ] );
 
         $this->resolve_language_context();
     }
@@ -73,7 +80,6 @@ class TRP_Language_Switcher_V2 {
     public function init() {
         add_action( 'wp_enqueue_scripts', [ $this, 'enqueue_assets' ] );
         add_action( 'wp_footer', [ $this, 'render_floater' ], 99 );
-        add_shortcode( 'language-switcher', [ $this, 'render_shortcode' ] );
         add_filter( 'wp_get_nav_menu_items', [ $this, 'filter_menu_items' ], 10, 3 );
 
         $this->register_ls_menu_switcher();
@@ -129,7 +135,9 @@ class TRP_Language_Switcher_V2 {
         $TRP_LANGUAGE = $needed_lang;
 
         $allow = apply_filters('trp_allow_language_redirect', true, $needed_lang, $this->url_converter->cur_page_url());
-        if (!$allow) return;
+
+        if ( !$allow || trp_dntcp_is_current_url_excluded() )
+            return;
 
         $missing_in_url = ($lang_from_url === null);
 
@@ -262,6 +270,10 @@ class TRP_Language_Switcher_V2 {
      * @return string
      */
     public function render_shortcode( $atts = [] ): string {
+        $loader = $this->trp->get_component( 'loader' );
+        if ( apply_filters( 'trp_allow_tp_to_run', true, $loader ) === false )
+            return '';
+
         $atts = shortcode_atts( [
             'is_editor' => 'false',
         ], $atts, 'language-switcher' );
@@ -290,10 +302,14 @@ class TRP_Language_Switcher_V2 {
         if ( empty( $list ) || !isset( $list[0]['code'] ) )
             return ''; // nothing to render
 
+        $item_has_label = $name_type !== 'none';
+
         foreach ( $list as &$item ) {
+            $url = wp_doing_ajax() ? wp_get_referer() : null;
+
             $code         = $item['code'];
-            $item['url']  = $this->url_converter->get_url_for_language( $code );
-            $item['flag'] = $this->get_flag_html( $code, $flag_ratio );
+            $item['url']  = $this->url_converter->get_url_for_language( $code, $url );
+            $item['flag'] = $this->get_flag_html( $code, $flag_ratio, $item_has_label );
             $item['name'] = isset( $item['name'] ) && is_string( $item['name'] ) ? $item['name'] : '';
         }
         unset( $item );
@@ -338,6 +354,8 @@ class TRP_Language_Switcher_V2 {
         $nameOpt = in_array( ( $layout['languageNames'] ?? 'full' ), [ 'full', 'short', 'none' ], true ) ? $layout['languageNames'] : 'full';
         $shape   = in_array( ( $layout['flagShape'] ?? 'rect' ), [ 'rect', 'square', 'rounded' ], true ) ? $layout['flagShape'] : 'rect';
 
+        $has_label = $nameOpt !== 'none'; // Used by get_flag_html to choose whether to display alt text or not
+
         $user_labels = [];
         foreach ( $items as $it ) {
             if ( $it->object !== 'language_switcher' ) continue;
@@ -380,7 +398,7 @@ class TRP_Language_Switcher_V2 {
                 $real_current_indexes[] = $i;
             }
 
-            $label_html = $user_labels[ $orig ] ?? null;
+            $label_html = !empty( $user_labels[ $orig ] ) && $has_label ? $user_labels[ $orig ] : null;
             if ( $label_html === null ) {
                 $label_html = $this->build_menu_item_label_viewport(
                     $code,
@@ -394,7 +412,7 @@ class TRP_Language_Switcher_V2 {
             } else {
                 // Allow flags around a plain user label if configured
                 if ( $flagPos !== 'hide' ) {
-                    $flag_html  = $this->get_flag_html( $code, $shape );
+                    $flag_html  = $this->get_flag_html( $code, $shape, $has_label );
                     $label_html = ( $flagPos === 'before' )
                         ? '<span data-no-translation>' . $flag_html . ' <span class="trp-ls-language-name">' . wp_kses_post( $label_html ) . '</span></span>'
                         : '<span data-no-translation><span class="trp-ls-language-name">' . wp_kses_post( $label_html ) . '</span> ' . $flag_html . '</span>';
@@ -446,7 +464,9 @@ class TRP_Language_Switcher_V2 {
         $nameOpt = $opts['nameOption']   ?? 'full';
         $shape   = $opts['flagShape']    ?? 'rect';
 
-        $flag_html = $flagPos === 'hide' ? '' : $this->get_flag_html( $code, $shape );
+        $has_label = $nameOpt !== 'none';
+
+        $flag_html = $flagPos === 'hide' ? '' : $this->get_flag_html( $code, $shape, $has_label );
 
         $name = '';
         if ( $nameOpt === 'full' ) {
@@ -694,17 +714,28 @@ class TRP_Language_Switcher_V2 {
      * lipis/flag-icons CSS classes.
      *
      * @param string $language_code Either “en”, “en_US”, “pt-BR”, etc.
+     * @param string $shape         Flag shape
+     * @param bool   $has_label     Whether the language item already has a label or not. We use it in order to display alt text on flags only display mode.
      * @return string               <span class="fi fi-xx">…</span>
      */
-    public function get_flag_html( string $language_code, string $shape ): string {
+    public function get_flag_html( string $language_code, string $shape, bool $has_label = false ): string {
+        global $TRP_LANGUAGE;
+
         // Allow override via filter (custom flag URL)
-        $flag_path = apply_filters( 'trp_flags_path', '', $language_code );
-        $name      = $this->languages->get_language_names( [ $language_code ] )[ $language_code ] ?? $language_code;
+        $flag_path  = apply_filters( 'trp_flags_path', '', $language_code );
+        $name       = $this->languages->get_language_names( [ $language_code ] )[ $language_code ] ?? $language_code;
+        $is_current = $language_code === $TRP_LANGUAGE;
+
+        // Alt logic
+        $alt  = $has_label || $is_current ? '' : sprintf( __( 'Change language to %s', 'translatepress-multilingual' ), $name );
+        $role = $has_label || $is_current ? ' role="presentation"' : '';
+
+        $classes = [ 'trp-flag-image' ];
+        if ( $shape === 'rounded' ) { $classes[] = 'trp-flag-rounded'; }
+        if ( $shape === 'square' )  { $classes[] = 'trp-flag-square'; }
 
         if ( filter_var( $flag_path, FILTER_VALIDATE_URL ) ) {
-            $classes = [ 'trp-flag-image', 'trp-custom-flag' ];
-            if ( $shape === 'rounded' ) $classes[] = 'trp-flag-rounded';
-            if ( $shape === 'square' )  $classes[] = 'trp-flag-square';
+            $classes[] = 'trp-custom-flag';
 
             $html = sprintf(
                 '<img src="%s" class="%s" alt="%s" loading="lazy" decoding="async" width="18" height="14" />',
@@ -726,20 +757,16 @@ class TRP_Language_Switcher_V2 {
         $path = trailingslashit( TRP_PLUGIN_DIR ) . 'assets/flags/' . $ratio . '/' . $locale_file;
 
         // If missing, output nothing
-        if ( ! is_readable( $path ) ) {
+        if ( !is_readable( $path ) ) {
             return '';
         }
 
-        // Classes
-        $classes = [ 'trp-flag-image' ];
-        if ( $shape === 'rounded' ) $classes[] = 'trp-flag-rounded';
-        if ( $shape === 'square' )  $classes[] = 'trp-flag-square';
-
         $html = sprintf(
-            '<img src="%s" class="%s" alt="%s" loading="lazy" decoding="async" width="18" height="14" />',
+            '<img src="%s" class="%s" alt="%s"%s loading="lazy" decoding="async" width="18" height="14" />',
             esc_url( $url ),
             esc_attr( implode( ' ', $classes ) ),
-            esc_attr( $name )
+            esc_attr( $alt ),
+            $role
         );
 
         return apply_filters( 'trp_flag_html', $html, $language_code, $url );

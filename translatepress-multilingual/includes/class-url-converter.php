@@ -140,7 +140,11 @@ class TRP_Url_Converter {
             !in_array( 'rank_math/sitemap/url', $wp_current_filter ) &&
             !in_array( 'aiosp_sitemap_data',    $wp_current_filter ) &&
             !in_array( 'aioseo_sitemap_terms',  $wp_current_filter ) &&
-            !in_array( 'aioseo_sitemap_posts',  $wp_current_filter )
+            !in_array( 'aioseo_sitemap_posts',  $wp_current_filter ) &&
+            !in_array( 'slim_seo_sitemap_post',  $wp_current_filter ) &&
+            !in_array( 'slim_seo_sitemap_term',  $wp_current_filter ) &&
+            !in_array( 'slim_seo_sitemap_homepage',  $wp_current_filter ) &&
+            !in_array( 'slim_seo_sitemap_post_type_archive',  $wp_current_filter )
         ){
             return true;
         }
@@ -959,7 +963,7 @@ class TRP_Url_Converter {
      */
     public function get_path_no_lang_slug_from_url( $url ) {
         $language      = $this->get_lang_from_url_string( $url );
-        $url_lang_slug = $this->get_url_slug( $language );
+        $url_lang_slug = $language !== null ? $this->get_url_slug( $language ) : '';
         $url_object    = trp_cache_get( 'url_obj_' . hash( 'md4', $url ), 'trp' );
 
         if ( $url_object === false ) {
