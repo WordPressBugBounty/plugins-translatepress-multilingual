@@ -5,7 +5,7 @@ Tags: translate, translation, multilingual, automatic translation, ai translatio
 Requires at least: 3.1.0
 Tested up to: 7.0.2
 Requires PHP: 7.4
-Stable tag: 3.3
+Stable tag: 3.3.1
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -153,6 +153,9 @@ Yes, TranslatePress works out of the box with WooCommerce. You can use to build 
 
 For more information please check out our [documentation](https://translatepress.com/docs/translatepress/?utm_source=wp.org&utm_medium=tp-description-page&utm_campaign=TPFree).
 
+= Where do I report security bugs found in this plugin? =
+
+Please report security bugs found in the source code of the TranslatePress plugin through the [Patchstack Vulnerability Disclosure  Program](https://patchstack.com/database/vdp/55520b61-434d-4271-801d-b55f75b5cbe1). The Patchstack team will assist you with verification, CVE assignment, and notify the developers of this plugin.
 
 == Screenshots ==
 1. TranslatePress front-end visual translation editor in action
@@ -166,6 +169,10 @@ For more information please check out our [documentation](https://translatepress
 
 
 == Changelog ==
+= 3.3.1 =
+* Fixed cases of gettext database optimization failure due to index creation issues
+* Fixed cases of illegal mix of collation issues when running gettext database optimization
+
 = 3.3 =
 * Fixed XSS vulnerability with gettext markers in comments. Thanks to Pham Duc Anh and the Wordfence team for the report
 * Fixed XSS vulnerability in Translation Editor strings dropdown. Thanks to momopon1415 and the Wordfence team for the report
